@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>神経衰弱 対戦</title>
+    <style>
+        :root {
+            --bg-color: #073b1a;
+            --card-back: #a22;
+            --active-player: #f1c40f;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Hiragino Kaku Gothic ProN', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 60px;
+            z-index: 10;
+        }
+
+        .scoreboard { display: flex; gap: 8px; align-items: center; }
+
+        .timer-display {
+            font-family: monospace;
+            font-size: 1.2rem;
+            color: #00ff00;
+            background: #000;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+
+        .player-score {
+            padding: 5px 10px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            font-size: 0.8rem;
+            border: 2px solid transparent;
+        }
+
+        .player-score.active {
+            border-color: var(--active-player);
+            background: rgba(241, 196, 15, 0.2);
+            box-shadow: 0 0 10px var(--active-player);
+        }
+
+        main {
+            flex-grow: 1;
+            padding: 10px;
+            display: grid;
+            gap: 6px;
+            width: 100%;
+            height: calc(100vh - 60px);
+        }
+
+        .card {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            cursor: pointer;
+            transform-style: preserve-3d;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.2);
+        }
+
+        .card.flipped { transform: rotateY(180deg); }
+
+        .card-front, .card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .card-back {
+            background: var(--card-back);
+            border: 1.5px solid white;
+            background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 2px, transparent 0, transparent 4px);
+        }
+
+        .card-front {
+            background-color: white;
+            transform: rotateY(180deg);
+            color: #222;
+        }
+
+        .card-front.red { color: #d63031; }
+
+        .main-suit-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1;
+        }
+        
+        .main-suit {
+            font-size: clamp(2.5rem, 8vh, 5rem);
+            line-height: 1;
+            margin: -5px 0;
+        }
+        
+        .main-suit.upside-down { transform: rotate(180deg); }
+
+        .corner-index {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 1;
+            z-index: 2;
+        }
+
+        .num { font-size: clamp(0.8rem, 2.5vh, 1.4rem); font-weight: bold; }
+        .suit-small { font-size: clamp(0.6rem, 2vh, 1rem); }
+
+        .top-left { top: 2px; left: 2px; }
+        .bottom-right { bottom: 2px; right: 2px; transform: rotate(180deg); }
+
+        .card.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transition: 0.5s;
+        }
+
+        #setup {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            border-radius: 8px;
+            border: none;
+            background: #27ae60;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="setup">
+        <h1 style="color: ｗhite;">神経衰弱 対戦</h1>
+        <div style="margin: 20px;">
+            人数: 
+            <select id="p-select" style="font-size: 1.2rem; padding: 10px;">
+                <option value="1">1人</option>
+                <option value="2">2人</option>
+                <option value="3">3人</option>
+                <option value="4">4人</option>
+            </select>
+        </div>
+        <button onclick="startGame()">開始</button>
+    </div>
+
+    <header>
+        <div class="scoreboard">
+            <div id="timer" class="timer-display" style="display: none;">00:00</div>
+            <div id="score-container" style="display: flex; gap: 8px;"></div>
+        </div>
+        <button onclick="location.reload()" style="padding: 5px 10px; font-size: 0.8rem; background: #c0392b;">リセット</button>
+    </header>
+
+    <main id="grid"></main>
+
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playFlipSound() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const duration = 0.08;
+            const bufferSize = audioCtx.sampleRate * duration;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            const hpFilter = audioCtx.createBiquadFilter();
+            hpFilter.type = 'highpass';
+            hpFilter.frequency.setValueAtTime(2000, audioCtx.currentTime);
+            const lpFilter = audioCtx.createBiquadFilter();
+            lpFilter.type = 'lowpass';
+            lpFilter.frequency.setValueAtTime(8000, audioCtx.currentTime);
+            lpFilter.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + duration);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+            noise.connect(hpFilter); hpFilter.connect(lpFilter); lpFilter.connect(gain); gain.connect(audioCtx.destination);
+            noise.start();
+        }
+
+        const grid = document.getElementById('grid');
+        const scoreContainer = document.getElementById('score-container');
+        const timerDisplay = document.getElementById('timer');
+        const numbers = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        const suits = [
+            { m: '♠', c: 'black' }, { m: '♥', c: 'red' },
+            { m: '♦', c: 'red' }, { m: '♣', c: 'black' }
+        ];
+
+        let state = {
+            players: 1, current: 0, scores: [], flipped: [], matched: 0, lock: false,
+            startTime: null, timerInterval: null, lastPlayer: null
+        };
+
+        function startGame() {
+            audioCtx.resume();
+            state.players = parseInt(document.getElementById('p-select').value);
+            document.getElementById('setup').style.display = 'none';
+            
+            if (state.players === 1) {
+                timerDisplay.style.display = 'block';
+                startTimer();
+            }
+            initBoard();
+        }
+
+        function startTimer() {
+            state.startTime = Date.now();
+            state.timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+                const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const secs = String(elapsed % 60).padStart(2, '0');
+                timerDisplay.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function initBoard() {
+            grid.innerHTML = '';
+            scoreContainer.innerHTML = '';
+            state.scores = new Array(state.players).fill(0);
+            state.matched = 0;
+            
+            state.scores.forEach((_, i) => {
+                const div = document.createElement('div');
+                div.id = `p-${i}`;
+                div.className = `player-score ${i === 0 ? 'active' : ''}`;
+                div.innerHTML = `P${i+1}: <span class="s">0</span>`;
+                scoreContainer.appendChild(div);
+            });
+
+            let deck = [];
+            suits.forEach(s => numbers.forEach(n => deck.push({n, m: s.m, c: s.c})));
+            deck.sort(() => Math.random() - 0.5);
+
+            updateLayout();
+
+            deck.forEach(data => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.dataset.num = data.n;
+                card.innerHTML = `
+                    <div class="card-back"></div>
+                    <div class="card-front ${data.c}">
+                        <div class="corner-index top-left"><div class="num">${data.n}</div><div class="suit-small">${data.m}</div></div>
+                        <div class="main-suit-container">
+                            <div class="main-suit">${data.m}</div>
+                            <div class="main-suit upside-down">${data.m}</div>
+                        </div>
+                        <div class="corner-index bottom-right"><div class="num">${data.n}</div><div class="suit-small">${data.m}</div></div>
+                    </div>
+                `;
+                card.addEventListener('click', () => handleFlip(card));
+                grid.appendChild(card);
+            });
+        }
+
+        function handleFlip(card) {
+            if (state.lock || card.classList.contains('flipped') || card.classList.contains('hidden')) return;
+
+            playFlipSound();
+            card.classList.add('flipped');
+            state.flipped.push(card);
+
+            if (state.flipped.length === 2) {
+                state.lock = true;
+                const [c1, c2] = state.flipped;
+                
+                if (c1.dataset.num === c2.dataset.num) {
+                    state.scores[state.current]++;
+                    document.querySelector(`#p-${state.current} .s`).textContent = state.scores[state.current];
+                    state.matched++;
+                    
+                    // 最後に揃えたプレイヤーを記録
+                    state.lastPlayer = `P${state.current + 1}`;
+
+                    setTimeout(() => {
+                        c1.classList.add('hidden');
+                        c2.classList.add('hidden');
+                        state.flipped = [];
+                        state.lock = false;
+                        if (state.matched === 26) endGame();
+                    }, 600);
+                } else {
+                    setTimeout(() => {
+                        playFlipSound();
+                        c1.classList.remove('flipped');
+                        c2.classList.remove('flipped');
+                        state.flipped = [];
+                        changeTurn();
+                    }, 1000);
+                }
+            }
+        }
+
+        function changeTurn() {
+            if (state.players > 1) {
+                document.getElementById(`p-${state.current}`).classList.remove('active');
+                state.current = (state.current + 1) % state.players;
+                document.getElementById(`p-${state.current}`).classList.add('active');
+            }
+            state.lock = false;
+        }
+
+        function endGame() {
+            if (state.timerInterval) clearInterval(state.timerInterval);
+            
+            if (state.players === 1) {
+                alert(`クリア！ タイム: ${timerDisplay.textContent}`);
+            } else {
+                const max = Math.max(...state.scores);
+                const winners = state.scores.map((s, i) => s === max ? `P${i+1}` : null).filter(n => n);
+                
+                let resultMsg = `ゲーム終了！\n\n`;
+                resultMsg += `最後に揃えた人: ${state.lastPlayer}\n`;
+                resultMsg += `総合勝者: ${winners.join(', ')}`;
+                
+                alert(resultMsg);
+            }
+        }
+
+        function updateLayout() {
+            const isPortrait = window.innerHeight > window.innerWidth;
+            grid.style.gridTemplateColumns = isPortrait ? 'repeat(4, 1fr)' : 'repeat(13, 1fr)';
+            grid.style.gridTemplateRows = isPortrait ? 'repeat(13, 1fr)' : 'repeat(4, 1fr)';
+        }
+
+        window.addEventListener('resize', updateLayout);
+    </script>
+</body>
+</html>
