@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Touch or Blind the Numbers</title>
+    <style>
+        :root { --bg:#fff; --txt:#000; --bd:#000; --cbg:#fff; --clbg:#f0f0f0; --cltx:#ccc; --ac:#000; --actx:#fff; }
+        [data-theme="dark"] { --bg:#000; --txt:#fff; --bd:#fff; --cbg:#000; --clbg:#222; --cltx:#555; --ac:#fff; --actx:#000; }
+        body { font-family:sans-serif; background:var(--bg); color:var(--txt); display:flex; flex-direction:column; align-items:center; min-height:100vh; margin:0; padding:20px 0; box-sizing:border-box; user-select:none; transition:background .2s; }
+        .top { display:flex; justify-content:space-between; align-items:center; width:90vw; max-width:400px; margin-bottom:15px; }
+        h1 { font-size:18px; margin:0; font-weight:900; }
+        .t-btn, .m-btn, #btn-rst { background:var(--bg); color:var(--txt); border:1px solid var(--bd); font-weight:bold; cursor:pointer; border-radius:4px; }
+        .t-btn { padding:4px 8px; font-size:12px; }
+        .selector-group { display:flex; flex-direction:column; align-items:center; gap:8px; margin-bottom:15px; }
+        .m-btn { padding:5px 12px; font-size:12px; margin:0 3px; }
+        .m-btn.active { background:var(--ac); color:var(--actx); border-color:var(--ac); }
+        #timer { font-size:36px; font-weight:900; margin:10px 0; font-variant-numeric:tabular-nums; }
+        .g-box { position:relative; width:90vw; max-width:400px; }
+        #grid { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; width:100%; perspective:1000px; }
+        #ovl { position:absolute; top:0; left:0; width:100%; height:100%; display:none; align-items:center; justify-content:center; font-size:110px; font-weight:900; color:#fff; -webkit-text-stroke:4px #000; text-stroke:4px #000; z-index:10; pointer-events:none; }
+        .cell { position:relative; aspect-ratio:1; transform-style:preserve-3d; transition:transform .25s; cursor:pointer; }
+        .cell:active { transform:scale(0.95); }
+        .cell.flipped { transform:rotateY(180deg); }
+        .f, .b { position:absolute; width:100%; height:100%; backface-visibility:hidden; border:2px solid var(--bd); display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:bold; box-sizing:border-box; }
+        .f { background:var(--cbg); }
+        .b { background:var(--txt); transform:rotateY(180deg); }
+        .cell.cleared .f { background:var(--clbg); border-color:var(--cltx); color:var(--cltx); }
+        .cell.cleared { pointer-events:none; }
+        .cell.wrong .f { background:#ff3333!important; border-color:#ff3333!important; color:#fff!important; }
+        #btn-rst { margin:20px 0; padding:10px 24px; font-size:14px; border:2px solid var(--bd); border-radius:0; }
+        .r-box { width:90vw; max-width:400px; border:1px solid var(--bd); padding:15px; box-sizing:border-box; }
+        .r-item { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px dashed var(--cltx); font-variant-numeric:tabular-nums; font-size:14px; }
+    </style>
+</head>
+<body>
+    <div class="top"><h1>Touch or Blind the Numbers</h1><button class="t-btn" onclick="tglTheme()">DARK</button></div>
+    <div class="selector-group">
+        <div>
+            <button class="m-btn active" id="m-n" onclick="chgM('normal')">NORMAL</button>
+            <button class="m-btn" id="m-b" onclick="chgM('blind')">BLIND</button>
+        </div>
+        <div>
+            <button class="m-btn active" id="t-num" onclick="chgT('num')">1-25</button>
+            <button class="m-btn" id="t-abc" onclick="chgT('abc')">A-Z</button>
+            <button class="m-btn" id="t-kana" onclick="chgT('kana')">あ-ん</button>
+        </div>
+    </div>
+    <div id="timer">0.000</div>
+    <div class="g-box"><div id="ovl">5</div><div id="grid"></div></div>
+    <button id="btn-rst" onclick="init()">RESET</button>
+    <div class="r-box">
+        <div id="r-t" style="font-weight:bold; border-bottom:1px solid var(--bd); padding-bottom:5px; text-align:center; font-size:14px;"></div>
+        <div id="r-l" style="margin-top:10px;"></div>
+        <div style="text-align:center;"><button onclick="clrRec()" style="margin-top:10px; font-size:11px; background:none; border:none; color:var(--cltx); cursor:pointer; text-decoration:underline;">RESET RECORD</button></div>
+    </div>
+    <script>
+        const grid = document.getElementById('grid'), timer = document.getElementById('timer'), ovl = document.getElementById('ovl'), rT = document.getElementById('r-t'), rL = document.getElementById('r-l');
+        let mode = 'normal', type = 'num', nextIdx = 0, start = null, tInt = null, fInt = null, cInt = null, isRun = false, isCount = false, aCtx = null;
+        
+        // 各モードの文字データ定義
+        const datasets = {
+            num: Array.from({length: 25}, (_, i) => String(i + 1)),
+            abc: ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"],
+            kana: ["あ","い","う","え","お","か","き","く","け","こ","さ","し","す","せ","そ","た","ち","つ","て","と","な","に","ぬ","ね","の","は","ひ","ふ","へ","ほ","ま","み","む","め","も","や","ゆ","よ","ら","り","る","れ","ろ","わ","を","ん"]
+        };
+        let currentList = [];
+
+        function tglTheme() {
+            const b = document.body, isD = b.getAttribute('data-theme') === 'dark';
+            b.setAttribute('data-theme', isD ? 'light' : 'dark');
+            document.querySelector('.t-btn').textContent = isD ? 'DARK' : 'LIGHT';
+            ovl.style.color = isD ? '#fff' : '#000';
+            ovl.style.webkitTextStrokeColor = isD ? '#000' : '#fff';
+            document.querySelectorAll('.b').forEach(el => el.style.background = isD ? '#000' : '#fff');
+        }
+
+        function playSnd() {
+            if (!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (aCtx.state === 'suspended') aCtx.resume();
+            const now = aCtx.currentTime, bSiz = aCtx.sampleRate * 0.02, buf = aCtx.createBuffer(1, bSiz, aCtx.sampleRate), dat = buf.getChannelData(0);
+            for (let i = 0; i < bSiz; i++) dat[i] = Math.random() * 2 - 1;
+            const src = aCtx.createBufferSource(); src.buffer = buf;
+            const nFlt = aCtx.createBiquadFilter(); nFlt.type = 'highpass'; nFlt.frequency.setValueAtTime(3000, now);
+            const nGain = aCtx.createGain(); nGain.gain.setValueAtTime(0.4, now); nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.015);
+            src.connect(nFlt); nFlt.connect(nGain); nGain.connect(aCtx.destination);
+            const osc = aCtx.createOscillator(); osc.type = 'sine'; osc.frequency.setValueAtTime(1800, now); osc.frequency.exponentialRampToValueAtTime(600, now + 0.02);
+            const oGain = aCtx.createGain(); oGain.gain.setValueAtTime(0.6, now); oGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+            osc.connect(oGain); oGain.connect(aCtx.destination);
+            src.start(now); src.stop(now + 0.02); osc.start(now); osc.stop(now + 0.02);
+        }
+
+        function chgM(m) { if (isRun) return; if (isCount) clearInterval(cInt); mode = m; document.getElementById('m-n').classList.toggle('active', m=='normal'); document.getElementById('m-b').classList.toggle('active', m=='blind'); init(); }
+        function chgT(t) { if (isRun) return; if (isCount) clearInterval(cInt); type = t; document.getElementById('t-num').classList.toggle('active', t=='num'); document.getElementById('t-abc').classList.toggle('active', t=='abc'); document.getElementById('t-kana').classList.toggle('active', t=='kana'); init(); }
+
+        function init() {
+            clearInterval(tInt); clearInterval(fInt); clearInterval(cInt); timer.textContent = "0.000"; ovl.style.display = 'none';
+            nextIdx = 0; window.isFin = false; isRun = false; isCount = false; grid.innerHTML = '';
+            
+            currentList = [...datasets[type]];
+            const nums = [...currentList];
+            for(let i=nums.length-1; i>0; i--) { const j=Math.floor(Math.random()*(i+1)); [nums[i], nums[j]] = [nums[j], nums[i]]; }
+            
+            const isD = document.body.getAttribute('data-theme') === 'dark';
+            nums.forEach(char => {
+                const c = document.createElement('div'); c.className = 'cell';
+                const f = document.createElement('div'); f.className = 'f'; f.textContent = char;
+                const b = document.createElement('div'); b.className = 'b';
+                b.style.background = isD ? '#000' : '#fff';
+                c.append(f, b); c.addEventListener('pointerdown', () => hTouch(char, c)); grid.appendChild(c);
+            });
+            shRank(); if (mode == 'blind') stCount();
+        }
+
+        function stCount() {
+            isCount = true; let c = 5; ovl.textContent = c; ovl.style.display = 'flex';
+            cInt = setInterval(() => {
+                c--; if (c > 0) ovl.textContent = c; else if (c == 0) ovl.textContent = "START!";
+                else { clearInterval(cInt); ovl.style.display = 'none'; isCount = false; stTimer(); }
+            }, 1000);
+        }
+
+        function stTimer() { isRun = true; start = performance.now(); tInt = setInterval(() => timer.textContent = ((performance.now()-start)/1000).toFixed(3), 10); if (mode == 'blind') stBlind(); }
+        function stBlind() { fInt = setInterval(() => { if (!isRun) return; const cells = document.querySelectorAll('.cell:not(.cleared)'); cells.forEach(c => c.classList.add('flipped')); setTimeout(() => { if(window.isFin)return; cells.forEach(c => c.classList.remove('flipped')); }, 1000); }, 5000); }
+
+        function hTouch(char, c) {
+            if (isCount || window.isFin) return; 
+            const targetChar = currentList[nextIdx];
+            if (mode == 'normal' && nextIdx == 0 && !isRun && char === targetChar) stTimer();
+            if (char === targetChar) {
+                playSnd(); c.classList.remove('flipped'); c.classList.add('cleared'); nextIdx++;
+                if (nextIdx >= currentList.length) { clearInterval(tInt); clearInterval(fInt); window.isFin = true; eg(parseFloat(timer.textContent)); }
+            } else if (isRun && !c.classList.contains('cleared')) { c.classList.add('wrong'); setTimeout(() => c.classList.remove('wrong'), 150); }
+        }
+
+        function eg(t) {
+            isRun = false; document.querySelectorAll('.cell').forEach(c => c.classList.remove('flipped'));
+            const k = `ttn_v5_${mode}_${type}`, r = JSON.parse(localStorage.getItem(k))||[], now = new Date();
+            r.push({score: t, date: `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`});
+            r.sort((a,b)=>a.score-b.score); const s = r.slice(0,5); localStorage.setItem(k, JSON.stringify(s)); shRank();
+        }
+
+        function shRank() {
+            rT.textContent = `${mode.toUpperCase()} (${type.toUpperCase()}) TOP 5`; rL.innerHTML = ''; 
+            const r = JSON.parse(localStorage.getItem(`ttn_v5_${mode}_${type}`))||[];
+            if (!r.length) { rL.innerHTML = '<div style="color:var(--cltx); text-align:center; font-size:13px;">NO RECORD</div>'; return; }
+            r.forEach((v, i) => {
+                const d = document.createElement('div'); d.className = 'r-item';
+                d.innerHTML = `<span><b style="margin-right:10px;">#${i+1}</b></span><span style="font-size:11px;color:var(--cltx);margin-left:auto;margin-right:15px;">${v.date}</span><b>${v.score.toFixed(3)}s</b>`;
+                rL.appendChild(d);
+            });
+        }
+
+        function clrRec() { if (confirm('RESET RECORD?')) { localStorage.removeItem(`ttn_v5_${mode}_${type}`); shRank(); } }
+        init();
+    </script>
+</body>
+</html>
